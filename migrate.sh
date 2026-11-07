@@ -757,8 +757,8 @@ run_tls() {
         die "Изменения конфигурации Nginx для приложений отменены"
     fi
 
-    systemctl reload nginx
-    ok "Nginx перезагружен; stream.conf панели не изменён"
+    systemctl restart nginx
+    ok "Nginx полностью перезапущен; stream.conf панели не изменён"
 
     log "Проверка HTTPS приложений"
     for domain in "${APP_DOMAINS[@]}"; do
