@@ -8,11 +8,11 @@
 
 | Приложение | Каталог на обоих серверах | Домен |
 |---|---|---|
-| Twitch Drops Miner | `/root/twitch-miner` | `twitch.ww-host.website` |
-| Beszel Hub | `/root/beszel` | `status.ww-host.website` |
+| Twitch Drops Miner | `/root/twitch-miner` | `twitch.example.com` |
+| Beszel Hub | `/root/beszel` | `status.example.com` |
 | Beszel Agent | `/root/beszel-agent` | Отдельный домен не нужен |
-| Vaultwarden | `/root/vaultwarden` | `pass.ww-host.website` |
-| Lampac | `/opt/lampac-docker` | `lampac.ww-host.website` |
+| Vaultwarden | `/root/vaultwarden` | `pass.example.com` |
+| Lampac | `/opt/lampac-docker` | `lampac.example.com` |
 
 Дополнительно устанавливается Watchtower. Он запускается **последним**, чтобы не обновить образы в середине миграции.
 
@@ -145,10 +145,10 @@ sudo vds-migrate --cutover
 В панели DNS-провайдера направьте A-записи следующих доменов на IPv4 **нового** сервера:
 
 ```text
-pass.ww-host.website
-twitch.ww-host.website
-status.ww-host.website
-lampac.ww-host.website
+pass.example.com
+twitch.example.com
+status.example.com
+lampac.example.com
 ```
 
 Если у этих доменов есть AAAA-записи, обновите их на IPv6 нового сервера или удалите. Не оставляйте AAAA-записи на старом сервере.
