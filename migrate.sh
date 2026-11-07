@@ -316,9 +316,10 @@ sync_one() {
 }
 
 sync_projects() {
-    local dry_run="$1" i
+    local dry_run="$1" i label="SYNC"
+    [[ "$dry_run" == "yes" ]] && label="DRY-RUN"
     for i in "${!PROJECT_SRC[@]}"; do
-        log "${dry_run^^}: ${PROJECT_SRC[$i]} -> ${PROJECT_DST[$i]}"
+        log "$label: ${PROJECT_SRC[$i]} -> ${PROJECT_DST[$i]}"
         sync_one "${PROJECT_SRC[$i]}" "${PROJECT_DST[$i]}" "$dry_run"
     done
 
@@ -685,7 +686,10 @@ run_tls() {
 
         # A stale AAAA record would send IPv6 clients and ACME validation back
         # to the old server even after the A record has been moved.
-        resolved6=$(getent ahostsv6 "$domain" 2>/dev/null | awk '{print $1}' | sort -u || true)
+        # getent ahostsv6 may synthesize ::ffff:A.B.C.D from an A record.
+        # Such IPv4-mapped results are not real AAAA records and must be ignored.
+        resolved6=$(getent ahostsv6 "$domain" 2>/dev/null |
+            awk 'tolower($1) !~ /^::ffff:/ {print $1}' | sort -u || true)
         if [[ -n "$resolved6" ]]; then
             [[ -n "$new_ip6" ]] ||
                 die "$domain has AAAA records, but the NEW server has no detected IPv6; remove or update AAAA"
