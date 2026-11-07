@@ -49,38 +49,40 @@ IMAGE_TAGS=(
 )
 
 log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
-ok()   { printf '\033[1;32mOK:\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33mWARNING:\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+ok()   { printf '\033[1;32mГОТОВО:\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mВНИМАНИЕ:\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31mОШИБКА:\033[0m %s\n' "$*" >&2; exit 1; }
+next_step() { printf '\n\033[1;36mСледующий шаг:\033[0m %s\n' "$*"; }
 
 usage() {
     cat <<'USAGE'
-Run this script on the NEW server as root.
+Запускайте этот скрипт от root на НОВОМ сервере.
 
-Recommended order:
-  sudo ./migrate.sh --install-deps   Install Docker/rsync and configure SSH.
-  sudo ./migrate.sh --check          Read-only local and remote checks.
-  sudo ./migrate.sh --dry-run        Show files to copy; do not copy them.
-  sudo ./migrate.sh --sync           Initial copy while old apps keep running.
-  sudo ./migrate.sh --cutover        Stop old apps, final copy, start new apps.
+Рекомендуемый порядок:
+  sudo vds-migrate --install-deps   Установить Docker и rsync, настроить SSH.
+  sudo vds-migrate --check          Проверить оба сервера без изменения данных.
+  sudo vds-migrate --dry-run        Показать список файлов без копирования.
+  sudo vds-migrate --sync           Скопировать данные, не останавливая старые приложения.
+  sudo vds-migrate --cutover        Остановить старые приложения, выполнить финальную
+                                    синхронизацию и запустить приложения на новом сервере.
 
-After manually moving the four application DNS A records to the NEW server:
-  sudo ./migrate.sh --tls            Issue certificates, configure Nginx,
-                                     test HTTPS, then install Watchtower last.
+После ручного переключения A-записей четырёх приложений на НОВЫЙ сервер:
+  sudo vds-migrate --tls            Выпустить сертификаты, настроить Nginx,
+                                    проверить HTTPS и последним установить Watchtower.
 
-Additional command:
-  sudo ./migrate.sh --watchtower     Install/repair only Watchtower.
+Дополнительная команда:
+  sudo vds-migrate --watchtower     Установить или восстановить только Watchtower.
 
-Options:
-  --help                             Show this help.
+Справка:
+  sudo vds-migrate --help           Показать эту справку.
 
-The script does not migrate, replace, or stop the 3X-UI database.
-Watchtower schedule: 03:47 Asia/Yekaterinburg every day.
+Скрипт не переносит, не заменяет и не останавливает базу данных 3X-UI.
+Watchtower проверяет обновления ежедневно в 03:47 по Asia/Yekaterinburg.
 USAGE
 }
 
 require_root() {
-    [[ "$EUID" -eq 0 ]] || die "Run as root: sudo $0 $*"
+    [[ "$EUID" -eq 0 ]] || die "Запустите скрипт от root: sudo $0 $*"
 }
 
 load_config() {
@@ -105,8 +107,8 @@ save_config() {
 
 require_saved_connection() {
     [[ -n "$OLD_HOST" && -n "$OLD_PORT" && -n "$OLD_USER" && -n "$SSH_KEY" ]] ||
-        die "SSH is not configured. Run: sudo $0 --install-deps"
-    [[ -f "$SSH_KEY" ]] || die "SSH private key not found: $SSH_KEY"
+        die "SSH не настроен. Выполните: sudo vds-migrate --install-deps"
+    [[ -f "$SSH_KEY" ]] || die "Приватный SSH-ключ не найден: $SSH_KEY"
 }
 
 ssh_old() {
@@ -123,47 +125,47 @@ rsync_ssh_command() {
 configure_ssh() {
     local answer
 
-    log "SSH connection to the OLD server"
+    log "Настройка SSH-подключения к СТАРОМУ серверу"
 
-    read -r -p "Old server IP [$OLD_HOST]: " answer
+    read -r -p "IP-адрес старого сервера [$OLD_HOST]: " answer
     [[ -n "$answer" ]] && OLD_HOST="$answer"
-    [[ -n "$OLD_HOST" ]] || die "Old server IP is required"
+    [[ -n "$OLD_HOST" ]] || die "Укажите IP-адрес старого сервера"
 
-    read -r -p "Old server SSH port [$OLD_PORT]: " answer
+    read -r -p "SSH-порт старого сервера [$OLD_PORT]: " answer
     [[ -n "$answer" ]] && OLD_PORT="$answer"
     [[ "$OLD_PORT" =~ ^[0-9]+$ ]] && ((OLD_PORT >= 1 && OLD_PORT <= 65535)) ||
-        die "Invalid SSH port"
+        die "Некорректный SSH-порт"
 
-    read -r -p "Old server SSH user [$OLD_USER]: " answer
+    read -r -p "SSH-пользователь старого сервера [$OLD_USER]: " answer
     [[ -n "$answer" ]] && OLD_USER="$answer"
-    [[ "$OLD_USER" =~ ^[a-zA-Z0-9._-]+$ ]] || die "Invalid SSH user"
+    [[ "$OLD_USER" =~ ^[a-zA-Z0-9._-]+$ ]] || die "Некорректное имя SSH-пользователя"
 
-    read -r -p "Migration SSH key [$SSH_KEY]: " answer
+    read -r -p "Путь к SSH-ключу миграции [$SSH_KEY]: " answer
     [[ -n "$answer" ]] && SSH_KEY="$answer"
-    [[ "$SSH_KEY" == /* ]] || die "SSH key path must be absolute"
+    [[ "$SSH_KEY" == /* ]] || die "Путь к SSH-ключу должен быть абсолютным"
 
     local local_ip
     while read -r local_ip; do
         [[ -n "$local_ip" && "$local_ip" == "$OLD_HOST" ]] &&
-            die "OLD server IP equals a local IP. Run this script on the NEW server"
+            die "IP старого сервера совпадает с локальным IP. Запускайте скрипт на НОВОМ сервере"
     done < <(hostname -I 2>/dev/null | tr ' ' '\n')
 
     install -d -m 700 "$(dirname "$SSH_KEY")"
     if [[ ! -f "$SSH_KEY" ]]; then
-        log "Creating a dedicated migration SSH key"
+        log "Создание отдельного SSH-ключа для миграции"
         ssh-keygen -q -t ed25519 -N '' -C 'vds-docker-migration' -f "$SSH_KEY"
     fi
     chmod 600 "$SSH_KEY"
 
     if ! ssh_old true 2>/dev/null; then
-        log "Installing the public key on the OLD server"
-        echo "You may be asked to verify the host fingerprint and enter the SSH password once."
+        log "Установка публичного ключа на СТАРЫЙ сервер"
+        echo "Один раз может потребоваться подтвердить отпечаток сервера и ввести SSH-пароль."
         ssh-copy-id -i "${SSH_KEY}.pub" -p "$OLD_PORT" "$OLD_USER@$OLD_HOST"
     fi
 
-    ssh_old true || die "SSH key authentication to the OLD server failed"
+    ssh_old true || die "Не удалось подключиться к СТАРОМУ серверу по SSH-ключу"
     save_config
-    ok "SSH connected. Remote hostname: $(ssh_old hostname)"
+    ok "SSH подключён. Имя удалённого сервера: $(ssh_old hostname)"
 }
 
 check_os() {
@@ -171,33 +173,33 @@ check_os() {
     os_id=$(awk -F= '$1=="ID" {gsub(/"/,"",$2); print $2}' /etc/os-release)
     os_version=$(awk -F= '$1=="VERSION_ID" {gsub(/"/,"",$2); print $2}' /etc/os-release)
     [[ "$os_id" == "debian" && "$os_version" == "13" ]] ||
-        die "This migration targets Debian 13; detected: $os_id $os_version"
-    [[ "$(uname -m)" == "x86_64" ]] || die "The recorded application images target x86_64"
+        die "Скрипт рассчитан на Debian 13; обнаружено: $os_id $os_version"
+    [[ "$(uname -m)" == "x86_64" ]] || die "Записанные образы приложений рассчитаны на x86_64"
 }
 
 check_panel() {
-    log "Checking the existing 3X-UI and Nginx installation"
-    systemctl is-active --quiet x-ui || die "3X-UI service is not active"
-    systemctl is-active --quiet nginx || die "Nginx is not active"
-    command -v nginx >/dev/null || die "Nginx command not found"
-    command -v certbot >/dev/null || die "Certbot not found; install the panel first"
+    log "Проверка установленных 3X-UI и Nginx"
+    systemctl is-active --quiet x-ui || die "Служба 3X-UI не активна"
+    systemctl is-active --quiet nginx || die "Nginx не активен"
+    command -v nginx >/dev/null || die "Команда nginx не найдена"
+    command -v certbot >/dev/null || die "Certbot не найден; сначала установите панель"
     [[ -f /etc/nginx/stream-enabled/stream.conf ]] ||
-        die "Panel stream.conf not found"
+        die "Файл stream.conf панели не найден"
     nginx -t
-    ok "The panel configuration is healthy; its files will not be modified"
+    ok "Конфигурация панели исправна; её файлы изменяться не будут"
 }
 
 install_deps() {
     check_os
     check_panel
 
-    log "Installing local prerequisites"
+    log "Установка необходимых пакетов на НОВЫЙ сервер"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y ca-certificates curl rsync openssh-client iproute2
 
     if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-        log "Adding the official Docker APT repository"
+        log "Добавление официального APT-репозитория Docker"
         install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/debian/gpg \
             -o /etc/apt/keyrings/docker.asc
@@ -222,32 +224,33 @@ install_deps() {
     configure_ssh
 
     if ! ssh_old 'command -v rsync >/dev/null 2>&1'; then
-        log "rsync is missing on the OLD server"
-        read -r -p "Install rsync on the OLD server now? [y/N]: " answer
-        [[ "$answer" =~ ^[Yy]$ ]] || die "Remote rsync is required"
+        log "На СТАРОМ сервере не установлен rsync"
+        read -r -p "Установить rsync на СТАРЫЙ сервер сейчас? [y/N]: " answer
+        [[ "$answer" =~ ^[Yy]$ ]] || die "Для миграции требуется rsync на старом сервере"
         ssh_old 'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y rsync'
     fi
     ssh_old 'rsync --version | head -n 1'
-    ok "Dependencies are ready"
+    ok "Все зависимости установлены"
+    next_step "sudo vds-migrate --check"
 }
 
 check_remote_sources() {
     local src
     for src in "${PROJECT_SRC[@]}"; do
-        ssh_old "test -d '$src'" || die "Missing remote directory: $src"
+        ssh_old "test -d '$src'" || die "На старом сервере нет каталога: $src"
         ssh_old "test -f '$src/docker-compose.yml'" ||
-            die "Missing remote Compose file: $src/docker-compose.yml"
+            die "На старом сервере нет Compose-файла: $src/docker-compose.yml"
     done
     ssh_old 'command -v docker >/dev/null && docker ps --format "{{.Names}}"' ||
-        die "Cannot inspect Docker on the OLD server"
-    ssh_old 'command -v rsync >/dev/null' || die "rsync is missing on the OLD server"
+        die "Не удалось получить список Docker-контейнеров на СТАРОМ сервере"
+    ssh_old 'command -v rsync >/dev/null' || die "На СТАРОМ сервере не установлен rsync"
 }
 
 check_free_ports() {
     local port
     for port in 8090 8888 9090 9118 45876; do
         if ss -ltnH "( sport = :$port )" | grep -q .; then
-            die "Local TCP port $port is already in use"
+            die "Локальный TCP-порт $port уже занят"
         fi
     done
 }
@@ -257,33 +260,34 @@ run_check() {
     check_panel
     require_saved_connection
 
-    log "Local resources"
+    log "Ресурсы НОВОГО сервера"
     free -h
     df -h /
 
-    log "Local Docker"
-    command -v docker >/dev/null || die "Docker missing; run --install-deps"
-    docker compose version >/dev/null || die "Compose plugin missing; run --install-deps"
-    systemctl is-active --quiet docker || die "Docker service is not active"
+    log "Docker на НОВОМ сервере"
+    command -v docker >/dev/null || die "Docker не установлен; выполните --install-deps"
+    docker compose version >/dev/null || die "Плагин Compose не установлен; выполните --install-deps"
+    systemctl is-active --quiet docker || die "Служба Docker не активна"
     docker --version
     docker compose version
 
-    command -v rsync >/dev/null || die "Local rsync missing; run --install-deps"
+    command -v rsync >/dev/null || die "Локальный rsync не установлен; выполните --install-deps"
     check_free_ports
 
-    log "Remote SSH and source data"
-    ssh_old true || die "SSH connection failed"
+    log "Проверка SSH и исходных данных на СТАРОМ сервере"
+    ssh_old true || die "SSH-подключение не удалось"
     check_remote_sources
-    ssh_old 'printf "Remote host: "; hostname; docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"'
+    ssh_old 'printf "Удалённый сервер: "; hostname; docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"'
 
-    ok "All preflight checks passed"
+    ok "Все предварительные проверки пройдены"
+    next_step "sudo vds-migrate --dry-run"
 }
 
 assert_target_safe() {
     local dst="$1"
     if [[ -d "$dst" ]] && [[ -n "$(find "$dst" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
         [[ -f "$dst/$MANAGED_MARKER" ]] ||
-            die "Target is non-empty and not managed by this script: $dst"
+            die "Каталог назначения не пуст и не был создан этим скриптом: $dst"
     fi
 }
 
@@ -316,8 +320,8 @@ sync_one() {
 }
 
 sync_projects() {
-    local dry_run="$1" i label="SYNC"
-    [[ "$dry_run" == "yes" ]] && label="DRY-RUN"
+    local dry_run="$1" i label="СИНХРОНИЗАЦИЯ"
+    [[ "$dry_run" == "yes" ]] && label="ПРОВЕРКА БЕЗ КОПИРОВАНИЯ"
     for i in "${!PROJECT_SRC[@]}"; do
         log "$label: ${PROJECT_SRC[$i]} -> ${PROJECT_DST[$i]}"
         sync_one "${PROJECT_SRC[$i]}" "${PROJECT_DST[$i]}" "$dry_run"
@@ -325,7 +329,7 @@ sync_projects() {
 
     if [[ "$dry_run" != "yes" ]]; then
         install -d -m 0777 /opt/lampac-docker/cache
-        ok "Lampac cache was created empty; old cache contents were excluded"
+        ok "Создан пустой кэш Lampac; содержимое старого кэша не копировалось"
     fi
 }
 
@@ -333,21 +337,22 @@ run_dry_run() {
     check_os
     check_panel
     require_saved_connection
-    command -v rsync >/dev/null || die "Local rsync missing; run --install-deps"
-    ssh_old true || die "SSH connection failed"
+    command -v rsync >/dev/null || die "Локальный rsync не установлен; выполните --install-deps"
+    ssh_old true || die "SSH-подключение не удалось"
     check_remote_sources
     sync_projects yes
 
     cat <<EOF
 
-Dry run only. No application data was copied and no containers were changed.
-Lampac cache contents are excluded. 3X-UI and its database are excluded.
+Это только пробный запуск. Данные не скопированы, контейнеры не изменены.
+Кэш Lampac, панель 3X-UI и её база данных исключены из миграции.
 EOF
+    next_step "sudo vds-migrate --sync"
 }
 
 prepare_images() {
     local i
-    log "Pulling the exact image digests recorded on the OLD server"
+    log "Загрузка точных версий образов, записанных на СТАРОМ сервере"
     for i in "${!IMAGE_REFS[@]}"; do
         docker pull "${IMAGE_REFS[$i]}"
         docker tag "${IMAGE_REFS[$i]}" "${IMAGE_TAGS[$i]}"
@@ -363,16 +368,16 @@ wait_http() {
     local name="$1" port="$2" attempt
     for attempt in {1..30}; do
         if curl -sS --max-time 3 -o /dev/null "http://127.0.0.1:$port/"; then
-            ok "$name answers on 127.0.0.1:$port"
+            ok "$name отвечает на 127.0.0.1:$port"
             return 0
         fi
         sleep 2
     done
-    die "$name did not answer on local port $port"
+    die "$name не отвечает на локальном порту $port"
 }
 
 start_new_apps() {
-    log "Starting migrated applications on the NEW server"
+    log "Запуск перенесённых приложений на НОВОМ сервере"
     install -d -m 0777 /opt/lampac-docker/cache
 
     compose_up /root/beszel
@@ -386,7 +391,7 @@ start_new_apps() {
     wait_http "Twitch Miner" 9090
     wait_http "Lampac" 9118
     docker inspect -f '{{.State.Running}}' beszel-agent | grep -qx true ||
-        die "Beszel agent is not running"
+        die "Beszel Agent не запущен"
 
     docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 }
@@ -397,7 +402,7 @@ cutover_exit_trap() {
     local status=$?
     trap - EXIT
     if [[ "$OLD_STOPPED" == "yes" && "$CUTOVER_SUCCESS" != "yes" ]]; then
-        warn "Cutover failed; attempting to restart applications on the OLD server"
+        warn "Переключение не удалось; пытаюсь снова запустить приложения на СТАРОМ сервере"
         set +e
         ssh_old 'docker start lampac vaultwarden beszel beszel-agent twitch-miner'
     fi
@@ -408,36 +413,36 @@ run_cutover() {
     check_os
     check_panel
     require_saved_connection
-    command -v rsync >/dev/null || die "Local rsync missing"
-    systemctl is-active --quiet docker || die "Docker is not active"
-    ssh_old true || die "SSH connection failed"
+    command -v rsync >/dev/null || die "Локальный rsync не установлен"
+    systemctl is-active --quiet docker || die "Docker не активен"
+    ssh_old true || die "SSH-подключение не удалось"
     check_remote_sources
     check_free_ports
 
-    log "Initial synchronization before downtime"
+    log "Предварительная синхронизация перед остановкой приложений"
     sync_projects no
     prepare_images
 
     cat <<'EOF'
 
-FINAL CUTOVER
-The following containers will be stopped on the OLD server:
+ФИНАЛЬНОЕ ПЕРЕКЛЮЧЕНИЕ
+На СТАРОМ сервере будут остановлены контейнеры:
   twitch-miner, beszel, beszel-agent, vaultwarden, lampac
-The 3X-UI service and its database will NOT be stopped.
-After a successful start on the NEW server, old application containers
-will remain stopped to prevent two copies from writing to different data.
+Служба 3X-UI и её база данных НЕ будут остановлены.
+После успешного запуска на НОВОМ сервере старые контейнеры останутся
+остановленными, чтобы две копии не записывали данные одновременно.
 EOF
     local confirmation
-    read -r -p 'Type MIGRATE to continue: ' confirmation
-    [[ "$confirmation" == "MIGRATE" ]] || die "Cutover cancelled"
+    read -r -p 'Для продолжения введите MIGRATE: ' confirmation
+    [[ "$confirmation" == "MIGRATE" ]] || die "Переключение отменено"
 
     trap cutover_exit_trap EXIT
 
-    log "Stopping applications on the OLD server"
+    log "Остановка приложений на СТАРОМ сервере"
     OLD_STOPPED=yes
     ssh_old 'docker stop twitch-miner beszel beszel-agent vaultwarden lampac'
 
-    log "Final synchronization of consistent application data"
+    log "Финальная синхронизация согласованных данных приложений"
     sync_projects no
     start_new_apps
 
@@ -448,40 +453,43 @@ EOF
     new_ip=$(ip -4 route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
     cat <<EOF
 
-Applications are running on the NEW server. Old application containers remain stopped.
+Приложения запущены на НОВОМ сервере. Старые контейнеры остаются остановленными.
 
-Now manually change ONLY these application DNS records:
+Теперь вручную измените ТОЛЬКО DNS-записи этих приложений:
   pass.ww-host.website
   twitch.ww-host.website
   status.ww-host.website
   lampac.ww-host.website
 
-Point their A records to the NEW server IP: $new_ip
-If any of these domains has an AAAA record, point it to the NEW server IPv6
-address or remove the stale AAAA record. Do not leave it on the OLD server.
+Направьте их A-записи на IPv4 НОВОГО сервера: $new_ip
+Если у доменов есть AAAA-записи, направьте их на IPv6 НОВОГО сервера
+или удалите устаревшие AAAA-записи. Не оставляйте их на СТАРОМ сервере.
 
-Do not change panel or Reality DNS records for this Docker migration.
-After DNS changes run:
-  sudo $0 --tls
+DNS-записи панели и Reality при этой миграции изменять не нужно.
 EOF
+    next_step "Дождитесь применения DNS и выполните: sudo vds-migrate --tls"
 }
 
 write_nginx_configs() {
-    log "Writing application-only Nginx configuration"
+    log "Запись отдельной конфигурации Nginx только для приложений"
 
-    cat >/etc/nginx/stream-enabled/docker-apps.conf <<'NGINX'
-server {
-    listen 443;
-    listen [::]:443;
-    server_name
-        twitch.ww-host.website
-        lampac.ww-host.website
-        pass.ww-host.website
-        status.ww-host.website;
-    ssl_preread on;
-    proxy_protocol on;
-    proxy_pass 127.0.0.1:7443;
-}
+    # The actual panel installer provides this include inside its SNI map:
+    # include /etc/nginx/stream-sni.d/*.conf;
+    # Add only map entries; do not create a competing listener on port 443.
+    [[ -d /etc/nginx/stream-sni.d ]] ||
+        die "Не найден каталог SNI панели: /etc/nginx/stream-sni.d"
+    grep -qF 'include /etc/nginx/stream-sni.d/*.conf;' \
+        /etc/nginx/stream-enabled/stream.conf ||
+        die "В stream.conf панели нет include /etc/nginx/stream-sni.d/*.conf"
+
+    # Remove the obsolete separate listener left by earlier script versions.
+    rm -f /etc/nginx/stream-enabled/docker-apps.conf
+
+    cat >/etc/nginx/stream-sni.d/docker-apps.conf <<'NGINX'
+twitch.ww-host.website  www;
+lampac.ww-host.website  www;
+pass.ww-host.website    www;
+status.ww-host.website  www;
 NGINX
 
     cat >/etc/nginx/sites-available/docker-apps-80.conf <<'NGINX'
@@ -501,8 +509,7 @@ NGINX
 server {
     server_tokens off;
     server_name pass.ww-host.website;
-    listen 7443 ssl proxy_protocol;
-    listen [::]:7443 ssl proxy_protocol;
+    listen 127.0.0.1:7443 ssl proxy_protocol;
     http2 on;
     real_ip_header proxy_protocol;
     set_real_ip_from 127.0.0.1;
@@ -541,8 +548,7 @@ map $http_upgrade $connection_upgrade {
 server {
     server_tokens off;
     server_name twitch.ww-host.website;
-    listen 7443 ssl proxy_protocol;
-    listen [::]:7443 ssl proxy_protocol;
+    listen 127.0.0.1:7443 ssl proxy_protocol;
     http2 on;
     real_ip_header proxy_protocol;
     set_real_ip_from 127.0.0.1;
@@ -575,8 +581,7 @@ NGINX
 server {
     server_tokens off;
     server_name status.ww-host.website;
-    listen 7443 ssl proxy_protocol;
-    listen [::]:7443 ssl proxy_protocol;
+    listen 127.0.0.1:7443 ssl proxy_protocol;
     http2 on;
     real_ip_header proxy_protocol;
     set_real_ip_from 127.0.0.1;
@@ -603,8 +608,7 @@ NGINX
 server {
     server_tokens off;
     server_name lampac.ww-host.website;
-    listen 7443 ssl proxy_protocol;
-    listen [::]:7443 ssl proxy_protocol;
+    listen 127.0.0.1:7443 ssl proxy_protocol;
     http2 on;
     real_ip_header proxy_protocol;
     set_real_ip_from 127.0.0.1;
@@ -633,9 +637,9 @@ NGINX
 }
 
 install_watchtower() {
-    log "Installing Watchtower as the final migration step"
+    log "Установка Watchtower — последний этап миграции"
     check_panel
-    systemctl is-active --quiet docker || die "Docker is not active"
+    systemctl is-active --quiet docker || die "Docker не активен"
     install -d -m 700 /root/watchtower
 
     cat >/root/watchtower/docker-compose.yml <<EOF
@@ -655,32 +659,32 @@ EOF
     chmod 600 /root/watchtower/docker-compose.yml
     docker compose -f /root/watchtower/docker-compose.yml up -d
     docker inspect -f '{{.State.Running}}' watchtower | grep -qx true ||
-        die "Watchtower did not start"
-    ok "Watchtower will check and update applications daily at 03:47 Asia/Yekaterinburg"
+        die "Watchtower не запустился"
+    ok "Watchtower будет проверять и устанавливать обновления ежедневно в 03:47 по Asia/Yekaterinburg"
 }
 
 run_tls() {
     check_os
     check_panel
-    systemctl is-active --quiet docker || die "Docker is not active"
+    systemctl is-active --quiet docker || die "Docker не активен"
 
     local container
     for container in "${APP_CONTAINERS[@]}"; do
         docker inspect -f '{{.State.Running}}' "$container" | grep -qx true ||
-            die "Application container is not running: $container"
+            die "Контейнер приложения не запущен: $container"
     done
 
     local new_ip new_ip6 domain resolved resolved6
     new_ip=$(ip -4 route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
     new_ip6=$(ip -6 route get 2620:fe::fe 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}' || true)
-    [[ -n "$new_ip" ]] || die "Cannot determine the NEW server IPv4 address"
+    [[ -n "$new_ip" ]] || die "Не удалось определить IPv4-адрес НОВОГО сервера"
 
-    log "Checking application DNS records; expected NEW IPv4: $new_ip"
+    log "Проверка DNS приложений; ожидаемый IPv4 НОВОГО сервера: $new_ip"
     for domain in "${APP_DOMAINS[@]}"; do
         resolved=$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
         if ! grep -Fxq "$new_ip" <<<"$resolved"; then
-            printf 'ERROR: %s resolves to:\n%s\n' "$domain" "${resolved:-no IPv4 record}" >&2
-            die "Move application DNS first. Cloudflare proxy addresses are not supported by this check"
+            printf 'ОШИБКА: %s разрешается в:\n%s\n' "$domain" "${resolved:-нет IPv4-записи}" >&2
+            die "Сначала переключите DNS приложений. Адреса прокси Cloudflare эта проверка не поддерживает"
         fi
         ok "$domain -> $new_ip"
 
@@ -692,20 +696,20 @@ run_tls() {
             awk 'tolower($1) !~ /^::ffff:/ {print $1}' | sort -u || true)
         if [[ -n "$resolved6" ]]; then
             [[ -n "$new_ip6" ]] ||
-                die "$domain has AAAA records, but the NEW server has no detected IPv6; remove or update AAAA"
+                die "У $domain есть AAAA-записи, но IPv6 НОВОГО сервера не обнаружен; удалите или обновите AAAA"
             grep -Fxq "$new_ip6" <<<"$resolved6" ||
-                die "$domain has an AAAA record not pointing to the NEW server; update or remove it"
+                die "AAAA-запись $domain указывает не на НОВЫЙ сервер; обновите или удалите её"
             ok "$domain -> $new_ip6"
         fi
     done
 
     if [[ -z "$LETSENCRYPT_EMAIL" ]]; then
-        read -r -p "E-mail for Let's Encrypt expiry notices: " LETSENCRYPT_EMAIL
+        read -r -p "E-mail для уведомлений Let's Encrypt об окончании срока сертификатов: " LETSENCRYPT_EMAIL
     fi
-    [[ "$LETSENCRYPT_EMAIL" == *@*.* ]] || die "A valid e-mail is required"
+    [[ "$LETSENCRYPT_EMAIL" == *@*.* ]] || die "Укажите корректный e-mail"
     save_config
 
-    log "Issuing fresh certificates; Nginx will be stopped briefly"
+    log "Выпуск новых сертификатов; Nginx будет ненадолго остановлен"
     systemctl stop nginx
     local cert_status=0
     for domain in "${APP_DOMAINS[@]}"; do
@@ -714,12 +718,13 @@ run_tls() {
             { cert_status=$?; break; }
     done
     systemctl start nginx
-    ((cert_status == 0)) || die "Certificate issuance failed; panel Nginx was started again"
+    ((cert_status == 0)) || die "Не удалось выпустить сертификаты; Nginx панели снова запущен"
 
     local backup_dir path
     backup_dir="/root/vds-migration-backups/nginx-$(date +%Y%m%d-%H%M%S)"
     local -a managed_paths=(
         /etc/nginx/stream-enabled/docker-apps.conf
+        /etc/nginx/stream-sni.d/docker-apps.conf
         /etc/nginx/sites-available/docker-apps-80.conf
         /etc/nginx/sites-available/pass.conf
         /etc/nginx/sites-available/twitchminer.conf
@@ -741,7 +746,7 @@ run_tls() {
     write_nginx_configs
 
     if ! nginx -t; then
-        warn "Nginx test failed; rolling back application Nginx files"
+        warn "Проверка Nginx не пройдена; восстанавливаю прежние файлы приложений"
         for path in "${managed_paths[@]}"; do
             rm -f "$path"
             if [[ -e "$backup_dir$path" || -L "$backup_dir$path" ]]; then
@@ -749,17 +754,17 @@ run_tls() {
             fi
         done
         nginx -t || true
-        die "Application Nginx configuration was rolled back"
+        die "Изменения конфигурации Nginx для приложений отменены"
     fi
 
     systemctl reload nginx
-    ok "Nginx reloaded; panel stream.conf was not changed"
+    ok "Nginx перезагружен; stream.conf панели не изменён"
 
-    log "Checking HTTPS applications"
+    log "Проверка HTTPS приложений"
     for domain in "${APP_DOMAINS[@]}"; do
         curl -sS --max-time 20 -o /dev/null "https://$domain/" ||
-            die "HTTPS check failed: $domain. Watchtower was not installed"
-        ok "https://$domain/ answers"
+            die "HTTPS-проверка не пройдена: $domain. Watchtower не установлен"
+        ok "https://$domain/ отвечает"
     done
 
     # Watchtower is deliberately last: it must not update images mid-migration.
@@ -767,10 +772,12 @@ run_tls() {
 
     cat <<'EOF'
 
-Migration is complete.
-The old application containers remain stopped. Keep the old server unchanged
-for a rollback window while you verify logins, sessions, databases and updates.
+Миграция завершена.
+Старые контейнеры приложений остаются остановленными. Не изменяйте старый
+сервер некоторое время: он понадобится для отката, пока вы проверяете входы,
+сессии, базы данных и обновления.
 EOF
+    next_step "Проверьте состояние контейнеров: docker ps"
 }
 
 ACTION="${1:-}"
@@ -797,12 +804,16 @@ case "$ACTION" in
         check_os
         check_panel
         require_saved_connection
-        command -v rsync >/dev/null || die "Local rsync missing"
-        ssh_old true || die "SSH connection failed"
+        command -v rsync >/dev/null || die "Локальный rsync не установлен"
+        ssh_old true || die "SSH-подключение не удалось"
         check_remote_sources
         sync_projects no
+        next_step "Когда будете готовы остановить старые приложения: sudo vds-migrate --cutover"
         ;;
     --cutover)      run_cutover ;;
     --tls)          run_tls ;;
-    --watchtower)   install_watchtower ;;
+    --watchtower)
+        install_watchtower
+        next_step "Проверьте состояние контейнеров: docker ps"
+        ;;
 esac
